@@ -100,7 +100,7 @@ int main(int argc, char* argv[]) {
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
-        editor.update();
+        editor.edit();
 
 
 

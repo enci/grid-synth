@@ -10,7 +10,7 @@ class editor
 public:
     editor();
     ~editor() = default;
-    void update();
+    void edit();
 private:
     grid_synth m_synth;
 };

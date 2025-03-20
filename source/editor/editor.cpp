@@ -51,23 +51,33 @@ editor::editor() : m_synth(16, 16, alphabet::empty_symbol.id)
 }
 
 
-void editor::update()
+void editor::edit()
 {
-    ImGui::Begin("Editor");
+    ImGui::Begin("Alphabet");
+    auto& alphabet = *m_synth.get_alphabet();
+    // Edit the alphabet
+    ImGui::End();
 
+    ImGui::Begin("Transformations");
+    auto& transformations = m_synth.get_transformations();
+    // Edit the stack of transformations and enable/disable them
+    ImGui::End();
+
+    ImGui::Begin("Transformations");
+    // Get the current transformation and edit it
+    ImGui::End();
+
+
+    ImGui::Begin("Synthesizer");
     if(ImGui::Button("Synthesize"))
-    {
         m_synth.synthesize();
-    }
 
-
+    // Visualize the grid
     auto& grid = m_synth.get_grid();
-
     // Display the grid in the editor with small squares for each cell using a draw list
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 p = ImGui::GetCursorScreenPos();
     float square_size = 2.0f;
-
     for(int y = 0; y < grid.height(); ++y)
     {
         for(int x = 0; x < grid.width(); ++x)
@@ -78,7 +88,6 @@ void editor::update()
             draw_list->AddRectFilled(top_left, bottom_right, color);
         }
     }
-
     ImGui::End();
 }
 
