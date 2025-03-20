@@ -45,7 +45,8 @@ target_include_directories(imgui_lib PUBLIC
 )
 target_link_libraries(imgui_lib PUBLIC SDL3::SDL3)
 
-# nlohmann/json
+# Add JSON library (Option 1 - FetchContent, preferred)
+include(FetchContent)
 FetchContent_Declare(
         json
         GIT_REPOSITORY https://github.com/nlohmann/json.git
@@ -61,6 +62,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(visit_struct)
 
+# Add Portable File Dialogs library
+FetchContent_Declare(
+        pfd
+        GIT_REPOSITORY https://github.com/samhocevar/portable-file-dialogs.git
+        GIT_TAG main  # You might want to use a specific tag/commit for stability
+)
+FetchContent_MakeAvailable(pfd)
+
+
 # Source files
 set(SOURCES
         source/main.cpp
@@ -75,7 +85,11 @@ add_executable(grid_synth ${SOURCES})
 
 target_include_directories(grid_synth PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/source
+        ${pfd_SOURCE_DIR}  # This is the include path for portable-file-dialogs
 )
+
+# Define a preprocessor macro to enable Portable File Dialogs
+target_compile_definitions(grid_synth PRIVATE USE_PORTABLE_FILE_DIALOGS)
 
 target_link_libraries(grid_synth PRIVATE
         SDL3::SDL3
