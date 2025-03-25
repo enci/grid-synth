@@ -1,6 +1,14 @@
-#include <algorithm>
 #include "editor.hpp"
 #include "imgui.h"
+#include <fstream>
+#include <iostream>
+#include <algorithm>
+#include <nlohmann/json.hpp>
+
+#ifdef USE_PORTABLE_FILE_DIALOGS
+#define NOMINMAX
+#include <portable-file-dialogs.h>
+#endif
 
 using namespace gs;
 using namespace std;
@@ -9,7 +17,8 @@ namespace
 {
     ImColor nice_color(int idx)
     {
-        float hue = (float)idx / 16.0f;
+        static double golden_ratio_conjugate = 0.618033988749895;
+        float hue = (float)std::fmod(idx * golden_ratio_conjugate, 1.0);
         return ImColor::HSV(hue, 0.8f, 0.6f);
     }
 
@@ -17,16 +26,17 @@ namespace
     ImVec2 safe_size(float width, float height, float min_size = 1.0f)
     {
         return ImVec2(
-                std::max(min_size, width),
-                std::max(min_size, height)
+            std::max(min_size, width),
+            std::max(min_size, height)
         );
     }
 }
 
-editor::editor() : m_synth(16, 16, alphabet::empty_symbol.id),
-                   m_pattern_grid(3, 3, alphabet::wildcard_symbol.id),
-                   m_search_pattern(3, 3, alphabet::wildcard_symbol.id),
-                   m_replacement_pattern(3, 3, alphabet::wildcard_symbol.id)
+editor::editor()
+    : m_synth(16, 16, alphabet::empty_symbol.id),
+      m_pattern_grid(3, 3, alphabet::wildcard_symbol.id),
+      m_search_pattern(3, 3, alphabet::wildcard_symbol.id),
+      m_replacement_pattern(3, 3, alphabet::wildcard_symbol.id)
 {
     // Add some symbols to the alphabet
     m_synth.get_alphabet()->add_symbol({1, "F"});
@@ -47,7 +57,7 @@ editor::editor() : m_synth(16, 16, alphabet::empty_symbol.id),
     search(2, 0) = alphabet::wildcard_symbol.id;
     search(2, 1) = 1;
     search(2, 2) = alphabet::wildcard_symbol.id;
-    auto replacement = grid(3,3, alphabet::empty_symbol.id);
+    auto replacement = grid(3, 3, alphabet::empty_symbol.id);
     replacement(0, 0) = alphabet::wildcard_symbol.id;
     replacement(0, 1) = 1;
     replacement(0, 2) = alphabet::wildcard_symbol.id;
@@ -74,7 +84,7 @@ void editor::edit()
 void editor::edit_alphabet()
 {
     ImGui::Begin("Alphabet");
-    auto alphabet_ptr = m_synth.get_alphabet(); // Removed reference since it's already a shared_ptr
+    auto alphabet_ptr = m_synth.get_alphabet(); // No reference since it's already a shared_ptr
 
     // Display existing symbols
     ImGui::Text("Symbols");
@@ -255,7 +265,8 @@ void editor::edit_transformation_stack()
     ImGui::Combo("Type", &transform_type, types, IM_ARRAYSIZE(types));
     ImGui::InputText("Name", transform_name, 64);
 
-    if (ImGui::Button("Add Transformation")) {
+    // Use explicit button size only for this full-width button
+    if (ImGui::Button("Add Transformation", ImVec2(-1, 24))) {
         if (strlen(transform_name) > 0) {
             if (transform_type == 0) { // Random
                 m_synth.add_transformation(make_unique<random_transformation>(transform_name, m_synth.get_alphabet()));
@@ -359,11 +370,22 @@ void editor::edit_rule_based_transformation(rule_based_transformation* transform
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 
         if (ImGui::BeginPopupModal("Pattern Editor", &m_editing_pattern, ImGuiWindowFlags_AlwaysAutoResize)) {
+            // Pattern type header
             ImGui::Text("Editing %s Pattern", m_editing_search ? "Search" : "Replacement");
+            ImGui::Separator();
 
             // Pattern dimensions
-            static int pattern_width = 3;
-            static int pattern_height = 3;
+            static int pattern_width = m_pattern_grid.width();
+            static int pattern_height = m_pattern_grid.height();
+
+            // Update static variables when pattern changes
+            if (pattern_width != m_pattern_grid.width()) {
+                pattern_width = m_pattern_grid.width();
+            }
+
+            if (pattern_height != m_pattern_grid.height()) {
+                pattern_height = m_pattern_grid.height();
+            }
 
             if (ImGui::SliderInt("Width", &pattern_width, 1, 8)) {
                 // Resize the pattern grid
@@ -433,8 +455,8 @@ void editor::edit_rule_based_transformation(rule_based_transformation* transform
 
             // Draw grid background
             draw_list->AddRectFilled(cursor,
-                                     ImVec2(cursor.x + grid_width, cursor.y + grid_height),
-                                     IM_COL32(50, 50, 50, 255));
+                ImVec2(cursor.x + grid_width, cursor.y + grid_height),
+                IM_COL32(50, 50, 50, 255));
 
             // Draw grid cells
             for (int y = 0; y < m_pattern_grid.height(); y++) {
@@ -463,8 +485,8 @@ void editor::edit_rule_based_transformation(rule_based_transformation* transform
 
                     ImVec2 text_size = ImGui::CalcTextSize(symbol_text.c_str());
                     ImVec2 text_pos(
-                            cell_min.x + (cell_size - text_size.x) * 0.5f,
-                            cell_min.y + (cell_size - text_size.y) * 0.5f
+                        cell_min.x + (cell_size - text_size.x) * 0.5f,
+                        cell_min.y + (cell_size - text_size.y) * 0.5f
                     );
 
                     draw_list->AddText(text_pos, IM_COL32(255, 255, 255, 255), symbol_text.c_str());
@@ -478,8 +500,8 @@ void editor::edit_rule_based_transformation(rule_based_transformation* transform
 
             // Add spacing for the grid - ensure minimum dimensions
             ImGui::InvisibleButton("##grid", ImVec2(
-                    std::max(1.0f, grid_width),
-                    std::max(1.0f, grid_height)
+                std::max(1.0f, grid_width),
+                std::max(1.0f, grid_height)
             ));
 
             ImGui::Separator();
@@ -523,11 +545,20 @@ void editor::edit_synthesizer()
 {
     ImGui::Begin("Synthesizer");
 
-    if (ImGui::Button("Synthesize", ImVec2(100, 24))) {
+    // File operations
+    if (ImGui::Button("Save")) {
+        show_file_dialog(true);
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("Load")) {
+        show_file_dialog(false);
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("Synthesize")) {
         m_synth.synthesize();
     }
-
-    ImGui::SameLine();
 
     // Grid size controls
     static int grid_width = m_synth.get_grid().width();
@@ -549,13 +580,13 @@ void editor::edit_synthesizer()
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Resize", ImVec2(60, 24))) {
+    if (ImGui::Button("Resize")) {
         m_synth.get_grid().resize(grid_width, grid_height);
     }
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Clear", ImVec2(60, 24))) {
+    if (ImGui::Button("Clear")) {
         m_synth.get_grid().clear(alphabet::empty_symbol.id);
     }
 
@@ -572,8 +603,8 @@ void editor::edit_synthesizer()
     int safe_grid_height = std::max(1, grid.height());
 
     float cell_size = std::min(
-            available_width / safe_grid_width,
-            available_height / safe_grid_height
+        available_width / safe_grid_width,
+        available_height / safe_grid_height
     );
 
     cell_size = std::max(4.0f, std::min(32.0f, cell_size));
@@ -588,21 +619,21 @@ void editor::edit_synthesizer()
 
     // Background
     draw_list->AddRectFilled(
-            canvas_pos,
-            ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
-            IM_COL32(50, 50, 50, 255)
+        canvas_pos,
+        ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+        IM_COL32(50, 50, 50, 255)
     );
 
     // Grid cells
     for (int y = 0; y < grid.height(); ++y) {
         for (int x = 0; x < grid.width(); ++x) {
             ImVec2 cell_min = ImVec2(
-                    canvas_pos.x + x * cell_size,
-                    canvas_pos.y + y * cell_size
+                canvas_pos.x + x * cell_size,
+                canvas_pos.y + y * cell_size
             );
             ImVec2 cell_max = ImVec2(
-                    cell_min.x + cell_size,
-                    cell_min.y + cell_size
+                cell_min.x + cell_size,
+                cell_min.y + cell_size
             );
 
             int symbol_id = grid(x, y);
@@ -625,8 +656,8 @@ void editor::edit_synthesizer()
 
                 ImVec2 text_size = ImGui::CalcTextSize(symbol_text.c_str());
                 ImVec2 text_pos(
-                        cell_min.x + (cell_size - text_size.x) * 0.5f,
-                        cell_min.y + (cell_size - text_size.y) * 0.5f
+                    cell_min.x + (cell_size - text_size.x) * 0.5f,
+                    cell_min.y + (cell_size - text_size.y) * 0.5f
                 );
 
                 draw_list->AddText(text_pos, IM_COL32(255, 255, 255, 255), symbol_text.c_str());
@@ -637,8 +668,8 @@ void editor::edit_synthesizer()
     // Allow interaction with the grid canvas
     // Make sure the canvas size is never zero
     ImVec2 safe_canvas_size = ImVec2(
-            std::max(1.0f, canvas_size.x),
-            std::max(1.0f, canvas_size.y)
+        std::max(1.0f, canvas_size.x),
+        std::max(1.0f, canvas_size.y)
     );
     ImGui::InvisibleButton("canvas", safe_canvas_size);
 
@@ -654,6 +685,206 @@ void editor::edit_synthesizer()
         }
     }
 
+    // Save dialog
+    if (m_show_save_dialog) {
+        ImGui::OpenPopup("Save Grid Synth");
+    }
+
+    if (ImGui::BeginPopupModal("Save Grid Synth", &m_show_save_dialog)) {
+        ImGui::Text("Enter filename:");
+        ImGui::InputText("##filename", m_filename, 256);
+
+        if (ImGui::Button("Save")) {
+            // Ensure the filename has .json extension
+            std::string filename = m_filename;
+            if (filename.find(".json") == std::string::npos) {
+                filename += ".json";
+            }
+
+            // Save to file
+            if (save_to_file(filename)) {
+                ImGui::CloseCurrentPopup();
+                m_show_save_dialog = false;
+            } else {
+                // Error handling could be improved
+                std::cerr << "Failed to save to file: " << filename << std::endl;
+            }
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+            m_show_save_dialog = false;
+        }
+
+        ImGui::EndPopup();
+    }
+
+    // Load dialog
+    if (m_show_load_dialog) {
+        ImGui::OpenPopup("Load Grid Synth");
+    }
+
+    if (ImGui::BeginPopupModal("Load Grid Synth", &m_show_load_dialog)) {
+        ImGui::Text("Enter filename:");
+        ImGui::InputText("##filename", m_filename, 256);
+
+        if (ImGui::Button("Load")) {
+            // Ensure the filename has .json extension
+            std::string filename = m_filename;
+            if (filename.find(".json") == std::string::npos) {
+                filename += ".json";
+            }
+
+            // Load from file
+            if (load_from_file(filename)) {
+                ImGui::CloseCurrentPopup();
+                m_show_load_dialog = false;
+            } else {
+                // Error handling could be improved
+                std::cerr << "Failed to load from file: " << filename << std::endl;
+            }
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+            m_show_load_dialog = false;
+        }
+
+        ImGui::EndPopup();
+    }
+
     ImGui::End();
 }
 
+// File operations
+bool editor::save_to_file(const std::string& filename)
+{
+    try {
+        // Get JSON representation of the grid_synth
+        nlohmann::json j = m_synth.to_json();
+
+        // Open file for writing
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Could not open file for writing: " << filename << std::endl;
+            return false;
+        }
+
+        // Write JSON to file with pretty formatting (4-space indentation)
+        file << j.dump(4);
+
+        // Check for errors
+        if (file.bad()) {
+            std::cerr << "Error writing to file: " << filename << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error saving file: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool editor::load_from_file(const std::string& filename)
+{
+    try {
+        // Open file for reading
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Could not open file for reading: " << filename << std::endl;
+            return false;
+        }
+
+        // Parse JSON from file
+        nlohmann::json j;
+        try {
+            file >> j;
+        }
+        catch (const nlohmann::json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            return false;
+        }
+
+        // Create grid_synth from JSON
+        try {
+            // Use std::move to transfer ownership of the unique_ptrs
+            m_synth = std::move(grid_synth::from_json(j));
+            m_selected_transform_index = -1; // Reset selection
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Error creating grid_synth from JSON: " << e.what() << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error loading file: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+void editor::show_file_dialog(bool isSave)
+{
+#ifdef USE_PORTABLE_FILE_DIALOGS
+    // Use Portable File Dialogs library
+    try {
+        // Set up the file dialog options
+        std::vector<std::string> filters = { "JSON Files", "*.json", "All Files", "*.*" };
+
+        if (isSave) {
+            // Show save dialog
+            auto selection = pfd::save_file("Save Grid Synth", "", filters).result();
+            if (!selection.empty()) {
+                std::string filename = selection;
+                // Ensure the filename has .json extension
+                if (filename.find(".json") == std::string::npos) {
+                    filename += ".json";
+                }
+
+                if (save_to_file(filename)) {
+                    // Success - nothing more to do
+                    strncpy(m_filename, filename.c_str(), sizeof(m_filename) - 1);
+                } else {
+                    // Show error message
+                    pfd::message("Error", "Failed to save file", pfd::choice::ok, pfd::icon::error);
+                }
+            }
+        } else {
+            // Show open dialog
+            auto selection = pfd::open_file("Open Grid Synth", "", filters).result();
+            if (!selection.empty() && !selection[0].empty()) {
+                std::string filename = selection[0];
+                if (load_from_file(filename)) {
+                    // Success - nothing more to do
+                    strncpy(m_filename, filename.c_str(), sizeof(m_filename) - 1);
+                } else {
+                    // Show error message
+                    pfd::message("Error", "Failed to load file", pfd::choice::ok, pfd::icon::error);
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "File dialog error: " << e.what() << std::endl;
+        // Fall back to ImGui dialog
+        if (isSave) {
+            m_show_save_dialog = true;
+        } else {
+            m_show_load_dialog = true;
+        }
+    }
+#else
+    // Fall back to ImGui dialog if PFD not available
+    if (isSave) {
+        m_show_save_dialog = true;
+    } else {
+        m_show_load_dialog = true;
+    }
+#endif
+}
